@@ -1,6 +1,5 @@
 const baileys = require('@whiskeysockets/baileys');
 const axios = require('axios');
-const qrcode = require('qrcode-terminal');
 
 async function startBot() {
     const { state, saveCreds } = await baileys.useMultiFileAuthState('auth_info');
@@ -23,10 +22,8 @@ async function startBot() {
     sock.ev.on('messages.upsert', async ({ messages }) => {
         const msg = messages[0];
         
-        // Ignorar mensagens do próprio bot ou sem conteúdo relevante
         if (!msg.message || msg.key.fromMe) return;
 
-        // Extrai o texto da mensagem, considerando diferentes formatos
         const userMessage = (msg.message.conversation || 
                              msg.message.extendedTextMessage?.text || 
                              msg.message.imageMessage?.caption || 
@@ -34,18 +31,16 @@ async function startBot() {
                              msg.message.documentMessage?.caption || 
                              "").trim();
 
-        // Filtra apenas mensagens que começam com '!'
         if (!userMessage.startsWith("!")) return;
 
         console.log("📩 Mensagem filtrada:", userMessage);
 
-        // Verifica se o código tem exatamente 8 caracteres
-        if (userMessage.length !== 9) { // 1 do "!" + 8 do código = 9 caracteres no total
+        if (userMessage.length !== 9) {
             await sock.sendMessage(msg.key.remoteJid, { text: "⚠️ O código precisa ter exatamente 8 caracteres!" });
             return;
         }
 
-        const codigoProduto = userMessage.slice(1); // Remove o "!"
+        const codigoProduto = userMessage.slice(1);
         console.log("🔎 Código extraído:", codigoProduto);
 
         try {
@@ -53,27 +48,44 @@ async function startBot() {
 
             if (response.data.success && response.data.data) {
                 const produto = response.data.data;
-                const estoqueInfo = produto.estoques.map(e =>
-                    `🏢 ${e.empresa} - Local ${e.localizacao}: ${e.qAtual} disponíveis`
-                ).join("\n");
+            
+                
+                const estoqueInfo = produto.estoques.map(e => {
+                    const unidade1 = produto.unidade
+                    const nomeEmpresa = e.empresa === "PTPC" ? "PPTM" : e.empresa === "GTPC" ? "EP" : e.empresa;
+                    const estoqueMsg = e.qAtual > 0 
 
-                const mensagemResposta = `📦 *Produto Encontrado!*\n\n` +
-                    `🔹 *Código*: ${produto.id}\n` +
-                    `🔹 *Nome*: ${produto.texto_breve}\n` +
-                    `🔹 *Descrição*: ${produto.texto_completo}\n` +
-                    `🔹 *Unidade*: ${produto.unidade}\n\n` +
-                    `📍 *Estoque por Localização:*\n${estoqueInfo}`;
+                        ? `${e.qAtual}` + " " + unidade1
+                        : `❌`;
+
+                    return `🏭 ${nomeEmpresa} - ${e.localizacao}: _${estoqueMsg}_`;
+                }).join("\n");
+
+                // Obtém os valores do estoque de segurança e substitui os nomes das empresas
+                const estoqueSegurancaPTPC = produto.estoque_seguranca_pptm ?? 0;
+                const estoqueSegurancaGTPC = produto.estoque_seguranca ?? 0;
+                const unidade = produto.unidade
+
+                const estoqueSegurancaInfo = `🏭 _*PPTM:*_ ${estoqueSegurancaPTPC > 0 ? estoqueSegurancaPTPC + " " + unidade : "❌"}\n` +
+                                             `🏭 _*EP:*_ ${estoqueSegurancaGTPC > 0 ? estoqueSegurancaGTPC + " " + unidade : "❌"}`;
+
+                // Monta a mensagem final
+                const mensagemResposta = `         📦 _*Produto Encontrado!*_\n\n` +
+                    `📌  _*Código:*_ ${produto.id}\n` +
+                    `📃  _*Texto breve:*_ ${produto.texto_breve}\n` +
+                    `📝  _*Descrição completa:*_ ${produto.texto_completo}\n\n` +
+                    `📍  _*Estoque por Localização:*_ \n${estoqueInfo}\n\n` +
+                    `⚠️  _*Estoque de Segurança:*_ \n${estoqueSegurancaInfo}`;
 
                 await sock.sendMessage(msg.key.remoteJid, { text: mensagemResposta });
             } else {
-                await sock.sendMessage(msg.key.remoteJid, { text: "❌ Produto não encontrado ou está bloqueado!" });
+                await sock.sendMessage(msg.key.remoteJid, { text: "❌ _Produto não encontrado ou está bloqueado!_" });
             }
         } catch (error) {
             console.error("Erro ao buscar o produto:", error);
-            await sock.sendMessage(msg.key.remoteJid, { text: "⚠️ Erro ao consultar o produto!" });
+            await sock.sendMessage(msg.key.remoteJid, { text: "⚠️ _Erro ao consultar o produto!_" });
         }
     });
 }
 
-// Inicia o bot
 startBot();
