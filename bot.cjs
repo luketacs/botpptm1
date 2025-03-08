@@ -1,5 +1,6 @@
 const baileys = require('@whiskeysockets/baileys');
 const axios = require('axios');
+const qrcode = require('qrcode-terminal')
 
 async function startBot() {
     const { state, saveCreds } = await baileys.useMultiFileAuthState('auth_info');
