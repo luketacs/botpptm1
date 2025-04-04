@@ -86,10 +86,22 @@ async function startBot() {
                 const produto = response.data.data;
                 const unidade = produto.unidade;
 
-                const estoqueInfo = produto.estoques.map(e => {
-                    const nomeEmpresa = e.empresa === "PTPC" ? "PPTM" : e.empresa === "GTPC" ? "EP" : e.empresa;
-                    const estoqueMsg = e.qAtual > 0 ? `${e.qAtual} ${unidade}` : "❌";
-                    return `🏭 ${nomeEmpresa} - ${e.localizacao}: _${estoqueMsg}_`;
+                const empresas = ["PPTM", "EP"]; // Empresas que devem sempre aparecer
+                const estoquesMap = {}; // Para armazenar os estoques por empresa
+
+                // Se houver registros de estoque, preenche o mapa
+                produto.estoques.forEach(e => {
+                const nomeEmpresa = e.empresa === "PTPC" ? "PPTM" : e.empresa === "GTPC" ? "EP" : e.empresa;
+                const unidade = produto.unidade;
+                const estoqueMsg = e.qAtual > 0 ? `${e.qAtual} ${unidade}` : `❌`;
+    
+                estoquesMap[nomeEmpresa] = `${estoqueMsg}`;
+                });
+
+                // Cria a mensagem garantindo que todas as empresas apareçam
+                const estoqueInfo = empresas.map(empresa => {
+                const estoqueMsg = estoquesMap[empresa] || "❌"; // Se não tiver no mapa, assume ❌
+                return `🏭 ${empresa}: _${estoqueMsg}_`;
                 }).join("\n");
 
                 const estoqueSegurancaPTPC = await obterEstoqueSeguranca(produto.id, "PTPC");
