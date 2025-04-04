@@ -1,6 +1,8 @@
 const baileys = require('@whiskeysockets/baileys');
 const axios = require('axios');
-const qrcode = require('qrcode-terminal')
+const qrcode = require('qrcode-terminal');
+const XLSX = require('xlsx');
+const path = require('path');
 
 async function startBot() {
     const { state, saveCreds } = await baileys.useMultiFileAuthState('auth_info');
@@ -49,28 +51,24 @@ async function startBot() {
 
             if (response.data.success && response.data.data) {
                 const produto = response.data.data;
-            
-                
+                const unidade = produto.unidade;
+
+                // Lê o estoque de segurança das planilhas
+                const estoqueSegurancaPPTM = buscarEstoqueSeguranca(codigoProduto, 'PPTM') ?? 0;
+                const estoqueSegurancaEP = buscarEstoqueSeguranca(codigoProduto, 'EP') ?? 0;
+
                 const estoqueInfo = produto.estoques.map(e => {
-                    const unidade1 = produto.unidade
                     const nomeEmpresa = e.empresa === "PTPC" ? "PPTM" : e.empresa === "GTPC" ? "EP" : e.empresa;
                     const estoqueMsg = e.qAtual > 0 
-
-                        ? `${e.qAtual}` + " " + unidade1
+                        ? `${e.qAtual} ${unidade}`
                         : `❌`;
 
                     return `🏭 ${nomeEmpresa} - ${e.localizacao}: _${estoqueMsg}_`;
                 }).join("\n");
 
-                // Obtém os valores do estoque de segurança e substitui os nomes das empresas
-                const estoqueSegurancaPTPC = produto.estoque_seguranca_pptm ?? 0;
-                const estoqueSegurancaGTPC = produto.estoque_seguranca ?? 0;
-                const unidade = produto.unidade
+                const estoqueSegurancaInfo = `🏭 _*PPTM:*_ ${estoqueSegurancaPPTM > 0 ? estoqueSegurancaPPTM + " " + unidade : "❌"}\n` +
+                                             `🏭 _*EP:*_ ${estoqueSegurancaEP > 0 ? estoqueSegurancaEP + " " + unidade : "❌"}`;
 
-                const estoqueSegurancaInfo = `🏭 _*PPTM:*_ ${estoqueSegurancaPTPC > 0 ? estoqueSegurancaPTPC + " " + unidade : "❌"}\n` +
-                                             `🏭 _*EP:*_ ${estoqueSegurancaGTPC > 0 ? estoqueSegurancaGTPC + " " + unidade : "❌"}`;
-
-                // Monta a mensagem final
                 const mensagemResposta = `         📦 _*Produto Encontrado!*_\n\n` +
                     `📌  _*Código:*_ ${produto.id}\n` +
                     `📃  _*Texto breve:*_ ${produto.texto_breve}\n` +
@@ -87,6 +85,34 @@ async function startBot() {
             await sock.sendMessage(msg.key.remoteJid, { text: "⚠️ _Erro ao consultar o produto!_" });
         }
     });
+}
+
+// Função para buscar estoque de segurança nas planilhas por empresa
+function buscarEstoqueSeguranca(codigoProduto, empresa) {
+    let arquivo;
+
+    if (empresa === 'PPTM') {
+        arquivo = path.join(__dirname, 'Estoque Segurança PPTM.xlsx');
+    } else if (empresa === 'EP') {
+        arquivo = path.join(__dirname, 'Estoque de segurança - Energia Pecém.xlsx');
+    } else {
+        return null;
+    }
+
+    try {
+        const workbook = XLSX.readFile(arquivo);
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const dados = XLSX.utils.sheet_to_json(sheet);
+
+        const produtoEncontrado = dados.find(p => 
+            String(p.Código).trim() === String(codigoProduto).trim()
+        );
+
+        return produtoEncontrado ? produtoEncontrado.EstoqueSeguranca : null;
+    } catch (err) {
+        console.error(`Erro ao ler a planilha da empresa ${empresa}:`, err);
+        return null;
+    }
 }
 
 startBot();
