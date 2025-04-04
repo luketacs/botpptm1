@@ -101,7 +101,7 @@ async function startBot() {
                 // Cria a mensagem garantindo que todas as empresas apareçam
                 const estoqueInfo = empresas.map(empresa => {
                 const estoqueMsg = estoquesMap[empresa] || "❌"; // Se não tiver no mapa, assume ❌
-                return `🏭 ${empresa}: _${estoqueMsg}_`;
+                return `🏭 _*${empresa}:*_ ${estoqueMsg}`;
                 }).join("\n");
 
                 const estoqueSegurancaPTPC = await obterEstoqueSeguranca(produto.id, "PTPC");
