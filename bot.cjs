@@ -86,18 +86,27 @@ async function startBot() {
                 const produto = response.data.data;
                 const unidade = produto.unidade;
 
-                // 🔍 Localizações com estoque > 0
-                const estoquesFiltrados = produto.estoques
-                    .filter(e => parseFloat(e.qAtual) > 0)
-                    .map(e => {
-                        const nomeEmpresa = e.empresa === "PTPC" ? "PPTM" : e.empresa === "GTPC" ? "EP" : e.empresa;
-                        return `${nomeEmpresa} - ${e.localizacao} - ${e.qAtual} ${unidade}`;
-                    });
+                // 🔢 Soma de estoque total por empresa
+                const empresas = ["PTPC", "GTPC"];
+                const empresaLabel = { PTPC: "PPTM", GTPC: "EP" };
+                const estoquesPorEmpresa = { PTPC: 0, GTPC: 0 };
 
-                const estoqueInfo = estoquesFiltrados.length > 0
-                    ? estoquesFiltrados.join("\n")
-                    : "❌ Sem estoque disponível em nenhuma localização";
+                produto.estoques.forEach(e => {
+                    const quantidade = parseFloat(e.qAtual) || 0;
+                    if (e.empresa === "PTPC") {
+                        estoquesPorEmpresa.PTPC += quantidade;
+                    } else if (e.empresa === "GTPC") {
+                        estoquesPorEmpresa.GTPC += quantidade;
+                    }
+                });
 
+                const estoqueInfo = empresas.map(emp => {
+                    const nome = empresaLabel[emp];
+                    const qtd = estoquesPorEmpresa[emp];
+                    return `🏭 _*${nome}:*_ ${qtd > 0 ? `${qtd} ${unidade}` : "❌"}`;
+                }).join("\n");
+
+                // 🛡️ Estoque de Segurança
                 const estoqueSegurancaPTPC = await obterEstoqueSeguranca(produto.id, "PTPC");
                 const estoqueSegurancaGTPC = await obterEstoqueSeguranca(produto.id, "GTPC");
 
@@ -105,16 +114,17 @@ async function startBot() {
                     `🏭 _*PPTM:*_ ${estoqueSegurancaPTPC > 0 ? estoqueSegurancaPTPC + " " + unidade : "❌"}\n` +
                     `🏭 _*EP:*_ ${estoqueSegurancaGTPC > 0 ? estoqueSegurancaGTPC + " " + unidade : "❌"}`;
 
+                // 📤 Monta e envia mensagem
                 const mensagemResposta = `         📦 _*Produto Encontrado!*_\n\n` +
                     `📌  _*Código:*_ ${produto.id}\n` +
                     `📃  _*Texto breve:*_ ${produto.texto_breve}\n` +
                     `📝  _*Descrição completa:*_ ${produto.texto_completo}\n\n` +
-                    `📍  _*Estoque por Localização:*_\n${estoqueInfo}\n\n` +
+                    `📍  _*Estoque por Empresa:*_\n${estoqueInfo}\n\n` +
                     `⚠️  _*Estoque de Segurança:*_\n${estoqueSegurancaInfo}`;
 
                 await sock.sendMessage(msg.key.remoteJid, { text: mensagemResposta });
             } else {
-                await sock.sendMessage(msg.key.remoteJid, { text: "❌ _Produto não encontrado ou está bloqueado!_" });
+                await sock.sendMessage(msg.key.remoteJid, { text: "❌ _Produto não encontrado!_" });
             }
         } catch (error) {
             console.error("Erro ao buscar o produto:", error);
