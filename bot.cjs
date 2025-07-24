@@ -72,7 +72,9 @@ async function startBot() {
         console.log("📩 Mensagem filtrada:", userMessage);
 
         if (userMessage.length !== 9) {
-            await sock.sendMessage(msg.key.remoteJid, { text: "⚠️ O código precisa ter exatamente 8 caracteres!" });
+            await sock.sendMessage(msg.key.remoteJid, {
+                text: "⚠️ O código precisa ter exatamente 8 caracteres!"
+            });
             return;
         }
 
@@ -82,11 +84,10 @@ async function startBot() {
         try {
             const response = await axios.get(`https://utepecem.com/sigma/api/getProduto/${codigoProduto}/todas/xEQ2y0SZufH5L1wJ2K98MVqCtjU8Sq6Z`);
 
-            if (response.status === 200 && response.data.data && response.data.sucess && response.data.data) {
+            if (response.status === 200 && response.data.data && response.data.sucess) {
                 const produto = response.data.data;
                 const unidade = produto.unidade;
 
-                // 🔢 Soma de estoque total por empresa
                 const empresas = ["PTPC", "GTPC"];
                 const empresaLabel = { PTPC: "PPTM", GTPC: "EP" };
                 const estoquesPorEmpresa = { PTPC: 0, GTPC: 0 };
@@ -106,7 +107,6 @@ async function startBot() {
                     return `🏭 _*${nome}:*_ ${qtd > 0 ? `${qtd} ${unidade}` : "❌"}`;
                 }).join("\n");
 
-                // 🛡️ Estoque de Segurança
                 const estoqueSegurancaPTPC = await obterEstoqueSeguranca(produto.id, "PTPC");
                 const estoqueSegurancaGTPC = await obterEstoqueSeguranca(produto.id, "GTPC");
 
@@ -114,7 +114,6 @@ async function startBot() {
                     `🏭 _*PPTM:*_ ${estoqueSegurancaPTPC > 0 ? estoqueSegurancaPTPC + " " + unidade : "❌"}\n` +
                     `🏭 _*EP:*_ ${estoqueSegurancaGTPC > 0 ? estoqueSegurancaGTPC + " " + unidade : "❌"}`;
 
-                // 📤 Monta e envia mensagem
                 const mensagemResposta = `         📦 _*Produto Encontrado!*_\n\n` +
                     `📌  _*Código:*_ ${produto.id}\n` +
                     `📃  _*Texto breve:*_ ${produto.texto_breve}\n` +
@@ -123,17 +122,20 @@ async function startBot() {
                     `⚠️  _*Estoque de Segurança:*_\n${estoqueSegurancaInfo}`;
 
                 await sock.sendMessage(msg.key.remoteJid, { text: mensagemResposta });
-             } else {
-        const erroApi = response.data?.message || "Comunicação com o Protheus está temporariamente offiline.";
-        await sock.sendMessage(msg.key.remoteJid, {
-            text: `❌ _Produto não encontrado!_\n🛠️ Detalhes: ${erroApi}`
-        });
-    }
-} catch (error) {
-    console.error("Erro ao buscar o produto:", error);
-    await sock.sendMessage(msg.key.remoteJid, {
-        text: "⚠️ Erro ao consultar o produto! Comunicação com o Protheus está temporariamente offiline."
+            } else {
+                const erroApi = response.data?.message || "Comunicação com o Protheus está temporariamente offline.";
+                await sock.sendMessage(msg.key.remoteJid, {
+                    text: `❌ _Produto não encontrado!_\n🛠️ Detalhes: ${erroApi}`
+                });
+            }
+        } catch (error) {
+            console.error("Erro ao buscar o produto:", error);
+            await sock.sendMessage(msg.key.remoteJid, {
+                text: "⚠️ Erro ao consultar o produto! Comunicação com o Protheus está temporariamente offline."
+            });
+        }
     });
 }
 
+// ✅ Chamada correta da função (fora da definição dela)
 startBot();
