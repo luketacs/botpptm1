@@ -126,7 +126,7 @@ async function startBot() {
              } else {
         const erroApi = response.data?.message || "Comunicação com o Protheus está temporariamente offiline.";
         await sock.sendMessage(msg.key.remoteJid, {
-            text: ❌ _Produto não encontrado!_\n🛠️ Detalhes: ${erroApi}
+            text: ❌ _Produto não encontrado!_\n🛠️ Detalhes: ${erroApi}`
         });
     }
 } catch (error) {
