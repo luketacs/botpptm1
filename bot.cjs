@@ -82,7 +82,7 @@ async function startBot() {
         try {
             const response = await axios.get(`https://utepecem.com/sigma/api/getProduto/${codigoProduto}/todas/xEQ2y0SZufH5L1wJ2K98MVqCtjU8Sq6Z`);
 
-            if (response.data.success && response.data.data) {
+            if (response.status === 200 && response.data.data && response.data.sucess && response.data.data) {
                 const produto = response.data.data;
                 const unidade = produto.unidade;
 
@@ -123,13 +123,16 @@ async function startBot() {
                     `⚠️  _*Estoque de Segurança:*_\n${estoqueSegurancaInfo}`;
 
                 await sock.sendMessage(msg.key.remoteJid, { text: mensagemResposta });
-            } else {
-                await sock.sendMessage(msg.key.remoteJid, { text: "❌ _Produto não encontrado!_" });
-            }
-        } catch (error) {
-            console.error("Erro ao buscar o produto:", error);
-            await sock.sendMessage(msg.key.remoteJid, { text: "⚠️ _Erro ao consultar o produto!_" });
-        }
+             } else {
+        const erroApi = response.data?.message || "Comunicação com o Protheus está temporariamente offiline.";
+        await sock.sendMessage(msg.key.remoteJid, {
+            text: ❌ _Produto não encontrado!_\n🛠️ Detalhes: ${erroApi}
+        });
+    }
+} catch (error) {
+    console.error("Erro ao buscar o produto:", error);
+    await sock.sendMessage(msg.key.remoteJid, {
+        text: "⚠️ Erro ao consultar o produto! Comunicação com o Protheus está temporariamente offiline."
     });
 }
 
