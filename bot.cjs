@@ -1,4 +1,4 @@
-const crypto = require('crypto');
+global.crypto = require('crypto');
 const baileys = require('@whiskeysockets/baileys');
 const axios = require('axios');
 const fs = require('fs');
