@@ -105,7 +105,7 @@ async function startBot() {
     try {
       const response = await axios.get(`https://utepecem.com/sigma/api/getProduto/${codigoProduto}/todas/xEQ2y0SZufH5L1wJ2K98MVqCtjU8Sq6Z`);
 
-      if (response.status === 200 && response.data.sucess && response.data.data) {
+      if (response.status === 200 && response.data.success && response.data.data) {
         const produto = response.data.data;
         const unidade = produto.unidade;
 
