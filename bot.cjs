@@ -36,7 +36,7 @@ async function obterEstoqueSeguranca(codigoProduto, empresa) {
 }
 
 async function startBot() {
-    const { state, saveCreds } = await baileys.useMultiFileAuthState('auth_info');
+    const { state, saveCreds } = await baileys.useMultiFileAuthState('auth_info1');
     const sock = baileys.default({
         auth: state,
         printQRInTerminal: true
