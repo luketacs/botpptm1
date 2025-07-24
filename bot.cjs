@@ -1,10 +1,18 @@
 global.crypto = require('crypto');
-const baileys = require('@whiskeysockets/baileys');
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  Boom
+} = require('@whiskeysockets/baileys');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const XLSX = require('xlsx');
+const P = require('pino');
 
+// Função para buscar estoque de segurança
 async function obterEstoqueSeguranca(codigoProduto, empresa) {
   let filePath;
   let colunaEstoque;
@@ -30,50 +38,57 @@ async function obterEstoqueSeguranca(codigoProduto, empresa) {
 
     return row?.[colunaEstoque] ?? 0;
   } catch (err) {
-    console.error("Erro ao ler planilha de estoque de segurança:", err);
+    console.error("❌ Erro ao ler planilha:", err);
     return 0;
   }
 }
 
+// Função principal do bot
 async function startBot() {
-  const { state, saveCreds } = await baileys.useMultiFileAuthState('auth_info');
+  const { state, saveCreds } = await useMultiFileAuthState('auth_info');
+  const { version } = await fetchLatestBaileysVersion();
 
-  const sock = baileys.default({
+  const sock = makeWASocket({
+    version,
     auth: state,
-    printQRInTerminal: true,  // <-- Mostra o QR code no terminal
+    printQRInTerminal: true,
+    logger: P({ level: 'info' }),
   });
 
   sock.ev.on('creds.update', saveCreds);
 
-  sock.ev.on('connection.update', (update) => {
+  sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      console.log('📲 Escaneie o QR Code acima com o WhatsApp.');
+      console.log('📲 Escaneie o QR Code acima com o WhatsApp para conectar.');
+    }
+
+    if (connection === 'open') {
+      console.log('✅ Bot conectado com sucesso!');
     }
 
     if (connection === 'close') {
-      const reason = baileys.DisconnectReason?.loggedOut || (lastDisconnect?.error ? new baileys.Boom(lastDisconnect.error).output.statusCode : null);
-      console.log('Conexão fechada:', reason);
-      if (reason !== baileys.DisconnectReason.loggedOut) {
-        console.log('Tentando reconectar...');
-        startBot();
+      const reasonCode = lastDisconnect?.error?.output?.statusCode;
+
+      if (reasonCode !== DisconnectReason.loggedOut) {
+        console.log('🔄 Tentando reconectar...');
+        await startBot();
       } else {
-        console.log('Sessão desconectada. Apague a pasta auth_info para reiniciar login.');
+        console.log('🛑 Sessão expirada. Apague a pasta "auth_info" para fazer login novamente.');
       }
-    } else if (connection === 'open') {
-      console.log('✅ Bot conectado com sucesso!');
     }
   });
 
+  // Comando principal
   sock.ev.on('messages.upsert', async ({ messages }) => {
     const msg = messages[0];
     if (!msg.message || msg.key.fromMe) return;
 
-    const text = msg.message.conversation || 
-      msg.message.extendedTextMessage?.text || 
-      msg.message.imageMessage?.caption || 
-      msg.message.videoMessage?.caption || 
+    const text = msg.message.conversation ||
+      msg.message.extendedTextMessage?.text ||
+      msg.message.imageMessage?.caption ||
+      msg.message.videoMessage?.caption ||
       msg.message.documentMessage?.caption || "";
 
     const userMessage = text.trim();
@@ -94,7 +109,6 @@ async function startBot() {
         const produto = response.data.data;
         const unidade = produto.unidade;
 
-        // Soma estoque total por empresa
         const estoques = { PTPC: 0, GTPC: 0 };
         produto.estoques.forEach(e => {
           const qtd = parseFloat(e.qAtual) || 0;
@@ -107,13 +121,13 @@ async function startBot() {
           `🏭 _*EP:*_ ${estoques.GTPC > 0 ? `${estoques.GTPC} ${unidade}` : "❌"}`
         ].join('\n');
 
-        // Estoque de segurança
         const estoqueSegPTPC = await obterEstoqueSeguranca(produto.id, "PTPC");
         const estoqueSegGTPC = await obterEstoqueSeguranca(produto.id, "GTPC");
 
-        const estoqueSegInfo = 
-          `🏭 _*PPTM:*_ ${estoqueSegPTPC > 0 ? `${estoqueSegPTPC} ${unidade}` : "❌"}\n` +
-          `🏭 _*EP:*_ ${estoqueSegGTPC > 0 ? `${estoqueSegGTPC} ${unidade}` : "❌"}`;
+        const estoqueSegInfo = [
+          `🏭 _*PPTM:*_ ${estoqueSegPTPC > 0 ? `${estoqueSegPTPC} ${unidade}` : "❌"}`,
+          `🏭 _*EP:*_ ${estoqueSegGTPC > 0 ? `${estoqueSegGTPC} ${unidade}` : "❌"}`
+        ].join('\n');
 
         const resposta = `📦 _*Produto Encontrado!*_\n\n` +
           `📌  _*Código:*_ ${produto.id}\n` +
@@ -125,14 +139,14 @@ async function startBot() {
         await sock.sendMessage(msg.key.remoteJid, { text: resposta });
 
       } else {
-        const erroApi = response.data?.message || "Comunicação com o Protheus está temporariamente offline.";
-        await sock.sendMessage(msg.key.remoteJid, { text: `❌ _Produto não encontrado!_\n🛠️ Detalhes: ${erroApi}` });
+        const erroApi = response.data?.message || "Servidor Protheus indisponível.";
+        await sock.sendMessage(msg.key.remoteJid, { text: `❌ Produto não encontrado!\nℹ️ ${erroApi}` });
       }
     } catch (error) {
-      console.error("Erro ao consultar produto:", error);
-      await sock.sendMessage(msg.key.remoteJid, { text: "⚠️ Erro ao consultar o produto! Comunicação temporariamente offline." });
+      console.error("❌ Erro na consulta ao produto:", error);
+      await sock.sendMessage(msg.key.remoteJid, { text: "⚠️ Erro de comunicação com o sistema Protheus." });
     }
   });
 }
-//
+
 startBot();
