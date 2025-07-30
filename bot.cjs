@@ -11,6 +11,9 @@ const fs = require('fs');
 const path = require('path');
 const XLSX = require('xlsx');
 const P = require('pino');
+const qrcode = require('qrcode-terminal');
+const https = require('https');
+const { Agent } = require('http');
 
 // Função para buscar estoque de segurança
 async function obterEstoqueSeguranca(codigoProduto, empresa) {
@@ -51,7 +54,6 @@ async function startBot() {
   const sock = makeWASocket({
     version,
     auth: state,
-    printQRInTerminal: true,
     logger: P({ level: 'info' }),
   });
 
@@ -61,7 +63,8 @@ async function startBot() {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      console.log('📲 Escaneie o QR Code acima com o WhatsApp para conectar.');
+      console.log('📲 Escaneie o QR Code abaixo com o WhatsApp para conectar:');
+      qrcode.generate(qr, { small: true });
     }
 
     if (connection === 'open') {
@@ -103,7 +106,9 @@ async function startBot() {
     const codigoProduto = userMessage.slice(1);
 
     try {
-      const response = await axios.get(`https://utepecem.com/sigma/api/getProduto/${codigoProduto}/todas/xEQ2y0SZufH5L1wJ2K98MVqCtjU8Sq6Z`);
+      const https = require('https');
+      const agent = new https.Agent({rejectUnauthorized: false,})
+      const response = await axios.get(`https://utepecem.com/sigma/api/getProduto/${codigoProduto}/todas/xEQ2y0SZufH5L1wJ2K98MVqCtjU8Sq6Z`, { httpsAgent: agent});
 
       if (response.status === 200 && response.data.success && response.data.data) {
         const produto = response.data.data;
@@ -140,7 +145,7 @@ async function startBot() {
 
       } else {
         const erroApi = response.data?.message || "Servidor Protheus indisponível.";
-        await sock.sendMessage(msg.key.remoteJid, { text: `❌ Produto não encontrado!\nℹ️ ${erroApi}` });
+        await sock.sendMessage(msg.key.remoteJid, { text: `\nℹ️ ${erroApi}` });
       }
     } catch (error) {
       console.error("❌ Erro na consulta ao produto:", error);
