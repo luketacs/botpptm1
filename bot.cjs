@@ -18,13 +18,7 @@ const P = require('pino');
 const qrcode = require('qrcode-terminal');
 const https = require('https');
 const { boomify, isBoom } = require('@hapi/boom');
-...
-if (isBoom(lastDisconnect.error)) {
-  reason = lastDisconnect.error.output?.statusCode;
-} else {
-  const boomified = boomify(lastDisconnect.error);
-  reason = boomified.output?.statusCode || 0;
-}
+
 // -----------------------------
 // CONFIG
 // -----------------------------
@@ -356,8 +350,8 @@ async function startBot() {
           try {
             if (lastDisconnect?.error) {
               if (lastDisconnect.error.output?.statusCode) reason = lastDisconnect.error.output.statusCode;
-              else if (Boom.isBoom(lastDisconnect.error)) reason = lastDisconnect.error.output?.statusCode;
-              else { const b = Boom.boomify(lastDisconnect.error); reason = b.output?.statusCode || 0; }
+              else if (isBoom(lastDisconnect.error)) reason = lastDisconnect.error.output?.statusCode;
+              else { const boomified = boomify(lastDisconnect.error); reason = b.output?.statusCode || 0; }
             }
           } catch (e) {
             reason = 0;
