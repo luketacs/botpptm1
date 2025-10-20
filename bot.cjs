@@ -276,13 +276,36 @@ function getBackoffDelay(attempts) {
 let watchdogTimer = null;
 let watchdogPingPending = false;
 let watchdogLastPing = 0;
+let presenceInterval = null;
 
 async function safeStopSock() {
   try {
     if (!globalSock) return;
-    try { await globalSock.logout().catch(() => {}); } catch {}
-    try { globalSock.ev.removeAllListeners(); } catch {}
-    try { globalSock.ws && globalSock.ws.close && globalSock.ws.close(); } catch {}
+    
+    // Clear intervals first
+    if (presenceInterval) {
+      clearInterval(presenceInterval);
+      presenceInterval = null;
+    }
+    if (watchdogTimer) {
+      clearInterval(watchdogTimer);
+      watchdogTimer = null;
+    }
+    
+    try { 
+      await globalSock.logout().catch(() => {}); 
+    } catch {}
+    
+    try { 
+      globalSock.ev.removeAllListeners(); 
+    } catch {}
+    
+    try { 
+      if (globalSock.ws && globalSock.ws.close) {
+        globalSock.ws.close();
+      }
+    } catch {}
+    
   } finally {
     globalSock = null;
   }
@@ -335,9 +358,14 @@ async function startBot() {
     sock.ev.on('connection.update', async (update) => {
       try {
         const { connection, lastDisconnect, qr } = update;
+        
         if (qr) {
           logInfo('📲 Escaneie o QR Code abaixo com o WhatsApp para conectar:');
           qrcode.generate(qr, { small: true });
+          
+          // Reset watchdog state durante autenticação
+          watchdogPingPending = false;
+          watchdogLastPing = 0;
         }
 
         if (connection === 'open') {
@@ -346,6 +374,9 @@ async function startBot() {
           // reset watchdog state
           watchdogPingPending = false;
           watchdogLastPing = 0;
+          
+          // Start watchdog only after successful connection
+          startWatchdog();
         }
 
         if (connection === 'close') {
@@ -391,25 +422,26 @@ async function startBot() {
 
     // messages.upsert
     sock.ev.on('messages.upsert', async ({ messages }) => {
+      let currentMsg = null;
       let presenceSent = false;
       
       try {
-        const msg = messages[0];
-        if (!msg || !msg.message) return;
+        currentMsg = messages[0];
+        if (!currentMsg || !currentMsg.message) return;
 
-        const text = msg.message.conversation ||
-          msg.message.extendedTextMessage?.text ||
-          msg.message.imageMessage?.caption ||
-          msg.message.videoMessage?.caption ||
-          msg.message.documentMessage?.caption || "";
+        const text = currentMsg.message.conversation ||
+          currentMsg.message.extendedTextMessage?.text ||
+          currentMsg.message.imageMessage?.caption ||
+          currentMsg.message.videoMessage?.caption ||
+          currentMsg.message.documentMessage?.caption || "";
 
         const userMessage = String(text || '').trim();
         if (!userMessage.startsWith('!')) return; // only respond to commands starting with !
 
-        logInfo('📨 Mensagem recebida:', userMessage, 'de', msg.key.remoteJid);
+        logInfo('📨 Mensagem recebida:', userMessage, 'de', currentMsg.key.remoteJid);
 
         // rate limiting per user - simple token bucket like
-        const remetente = msg.key.remoteJid;
+        const remetente = currentMsg.key.remoteJid;
         if (!global.rateLimiter) global.rateLimiter = new Map();
         const now = Date.now();
         const uso = global.rateLimiter.get(remetente) || { count: 0, lastTime: 0 };
@@ -513,9 +545,9 @@ _Desenvolvido para UTE Pecém_`;
       } catch (err) {
         logError('❌ Erro no messages.upsert handler:', err.message || err);
       } finally {
-        if (presenceSent) {
+        if (presenceSent && currentMsg) {
           try { 
-            await sock.sendPresenceUpdate('paused', msg.key.remoteJid); 
+            await sock.sendPresenceUpdate('paused', currentMsg.key.remoteJid); 
           } catch (err) {
             logWarn('⚠️ Erro ao pausar presença:', err.message);
           }
@@ -524,7 +556,7 @@ _Desenvolvido para UTE Pecém_`;
     });
 
     // presence / keep-alive ping
-    const presenceInterval = setInterval(async () => {
+    presenceInterval = setInterval(async () => {
       try {
         if (globalSock && globalSock.user) {
           await globalSock.sendPresenceUpdate('available');
@@ -534,42 +566,6 @@ _Desenvolvido para UTE Pecém_`;
         logWarn('⚠️ Falha ao enviar ping de presença:', err.message || err);
       }
     }, CONFIG.PRESENCE_INTERVAL);
-
-    // START WATCHDOG
-    if (watchdogTimer) clearInterval(watchdogTimer);
-    watchdogTimer = setInterval(async () => {
-      try {
-        if (!globalSock || !globalSock.ws) return;
-        // if readyState not OPEN (1), trigger restart
-        const ready = globalSock.ws.readyState;
-        if (ready !== 1) {
-          logWarn('⚠️ Watchdog detectou WebSocket não aberto (readyState=' + ready + '). Reiniciando...');
-          clearInterval(presenceInterval);
-          await safeStopSock();
-          setTimeout(() => startBot(), 2000);
-          return;
-        }
-        // send a small presence ping and mark pending
-        watchdogPingPending = true;
-        watchdogLastPing = Date.now();
-        try {
-          await globalSock.sendPresenceUpdate('available');
-        } catch (e) {
-          logWarn('⚠️ Watchdog ping falhou:', e.message || e);
-        }
-        // if ping still pending after response timeout, restart
-        setTimeout(async () => {
-          if (watchdogPingPending && (Date.now() - watchdogLastPing) > CONFIG.WATCHDOG_RESPONSE_TIMEOUT_MS) {
-            logWarn('⚠️ Watchdog: ping sem resposta em', CONFIG.WATCHDOG_RESPONSE_TIMEOUT_MS, 'ms. Reiniciando...');
-            clearInterval(presenceInterval);
-            await safeStopSock();
-            setTimeout(() => startBot(), 2000);
-          }
-        }, CONFIG.WATCHDOG_RESPONSE_TIMEOUT_MS + 100);
-      } catch (e) {
-        logWarn('⚠️ Watchdog erro:', e.message || e);
-      }
-    }, CONFIG.WATCHDOG_INTERVAL_MS);
 
     // on any incoming event we can mark ping responded
     sock.ev.on('chats.set', () => {
@@ -606,6 +602,66 @@ _Desenvolvido para UTE Pecém_`;
     await safeStopSock();
     setTimeout(() => startBot(), delay);
   }
+}
+
+// -----------------------------
+// WATCHDOG IMPROVED
+// -----------------------------
+function startWatchdog() {
+  // Clear existing watchdog
+  if (watchdogTimer) {
+    clearInterval(watchdogTimer);
+    watchdogTimer = null;
+  }
+
+  watchdogTimer = setInterval(async () => {
+    try {
+      if (!globalSock || !globalSock.user) {
+        logWarn('⚠️ Watchdog: Socket não está autenticado, ignorando...');
+        return;
+      }
+
+      // Check WebSocket state safely
+      let readyState = null;
+      try {
+        if (globalSock.ws) {
+          readyState = globalSock.ws.readyState;
+        }
+      } catch (e) {
+        logWarn('⚠️ Watchdog: Erro ao verificar readyState:', e.message);
+      }
+
+      // If readyState is not OPEN (1), trigger restart
+      if (readyState !== null && readyState !== 1) {
+        logWarn(`⚠️ Watchdog detectou WebSocket não aberto (readyState=${readyState}). Reiniciando...`);
+        await safeStopSock();
+        setTimeout(() => startBot(), 2000);
+        return;
+      }
+
+      // Send ping only if connected
+      if (readyState === 1) {
+        watchdogPingPending = true;
+        watchdogLastPing = Date.now();
+        try {
+          await globalSock.sendPresenceUpdate('available');
+        } catch (e) {
+          logWarn('⚠️ Watchdog ping falhou:', e.message || e);
+        }
+
+        // Check response timeout
+        setTimeout(async () => {
+          if (watchdogPingPending && (Date.now() - watchdogLastPing) > CONFIG.WATCHDOG_RESPONSE_TIMEOUT_MS) {
+            logWarn('⚠️ Watchdog: ping sem resposta em', CONFIG.WATCHDOG_RESPONSE_TIMEOUT_MS, 'ms. Reiniciando...');
+            await safeStopSock();
+            setTimeout(() => startBot(), 2000);
+          }
+        }, CONFIG.WATCHDOG_RESPONSE_TIMEOUT_MS + 100);
+      }
+    } catch (e) {
+      logWarn('⚠️ Watchdog erro:', e.message || e);
+    }
+  }, CONFIG.WATCHDOG_INTERVAL_MS);
 }
 
 // -----------------------------
