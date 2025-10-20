@@ -17,8 +17,14 @@ const XLSX = require('xlsx');
 const P = require('pino');
 const qrcode = require('qrcode-terminal');
 const https = require('https');
-const Boom = require('@hapi/boom');
-
+const { boomify, isBoom } = require('@hapi/boom');
+...
+if (isBoom(lastDisconnect.error)) {
+  reason = lastDisconnect.error.output?.statusCode;
+} else {
+  const boomified = boomify(lastDisconnect.error);
+  reason = boomified.output?.statusCode || 0;
+}
 // -----------------------------
 // CONFIG
 // -----------------------------
