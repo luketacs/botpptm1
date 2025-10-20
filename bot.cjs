@@ -31,11 +31,8 @@ const CONFIG = {
   API_KEY: process.env.API_KEY,
   CACHE_TTL_MS: 10 * 60 * 1000, // 10 min for planilhas and produtos
   PRODUCT_CACHE_TTL_MS: 5 * 60 * 1000, // 5 min per product cache
-  WATCHDOG_INTERVAL_MS: 2 * 60 * 1000, // 2min
-  WATCHDOG_RESPONSE_TIMEOUT_MS: 10000, // 10s to consider no response
   CACHE_PERSIST_FILE: path.join(__dirname, 'cachePlanilhas.json'),
   LOGS_DIR: path.join(__dirname, 'logs'),
-  RESTART_HOUR: 3, // 3:00 AM daily restart
   QUERY_CSV: path.join(__dirname, 'logs', 'consultas.csv')
 };
 
@@ -258,7 +255,7 @@ async function registrarConsultaCSV(usuario, codigo, status) {
 }
 
 // -----------------------------
-// RECONNECT/START logic + WATCHDOG + VERSION check
+// RECONNECT/START logic + VERSION check
 // -----------------------------
 let globalSock = null;
 let isStarting = false;
@@ -272,10 +269,7 @@ function getBackoffDelay(attempts) {
   return CONFIG.RECONNECT_BASE_DELAY * Math.pow(2, mult - 1); // exponential
 }
 
-// watchdog timer ref
-let watchdogTimer = null;
-let watchdogPingPending = false;
-let watchdogLastPing = 0;
+// Interval references
 let presenceInterval = null;
 
 async function safeStopSock() {
@@ -286,10 +280,6 @@ async function safeStopSock() {
     if (presenceInterval) {
       clearInterval(presenceInterval);
       presenceInterval = null;
-    }
-    if (watchdogTimer) {
-      clearInterval(watchdogTimer);
-      watchdogTimer = null;
     }
     
     try { 
@@ -346,7 +336,12 @@ async function startBot() {
       auth: state,
       logger: P({ level: 'info' }),
       printQRInTerminal: false,
-      browser: ['Ubuntu', 'Chrome', '22.04.4']
+      browser: ['Ubuntu', 'Chrome', '22.04.4'],
+      // Configurações adicionais para maior estabilidade
+      markOnlineOnConnect: true,
+      generateHighQualityLinkPreview: false,
+      syncFullHistory: false,
+      linkPreviewImageThumbnailWidth: 192
     });
 
     globalSock = sock;
@@ -362,21 +357,26 @@ async function startBot() {
         if (qr) {
           logInfo('📲 Escaneie o QR Code abaixo com o WhatsApp para conectar:');
           qrcode.generate(qr, { small: true });
-          
-          // Reset watchdog state durante autenticação
-          watchdogPingPending = false;
-          watchdogLastPing = 0;
         }
 
         if (connection === 'open') {
           logInfo('✅ Bot conectado com sucesso!');
           reconnectAttempts = 0;
-          // reset watchdog state
-          watchdogPingPending = false;
-          watchdogLastPing = 0;
           
-          // Start watchdog only after successful connection
-          startWatchdog();
+          // Start presence interval only after successful connection
+          if (presenceInterval) {
+            clearInterval(presenceInterval);
+          }
+          presenceInterval = setInterval(async () => {
+            try {
+              if (globalSock && globalSock.user) {
+                await globalSock.sendPresenceUpdate('available');
+                logInfo('💓 Ping de presença enviado.');
+              }
+            } catch (err) {
+              logWarn('⚠️ Falha ao enviar ping de presença:', err.message || err);
+            }
+          }, CONFIG.PRESENCE_INTERVAL);
         }
 
         if (connection === 'close') {
@@ -555,29 +555,6 @@ _Desenvolvido para UTE Pecém_`;
       }
     });
 
-    // presence / keep-alive ping
-    presenceInterval = setInterval(async () => {
-      try {
-        if (globalSock && globalSock.user) {
-          await globalSock.sendPresenceUpdate('available');
-          logInfo('💓 Ping de presença enviado.');
-        }
-      } catch (err) {
-        logWarn('⚠️ Falha ao enviar ping de presença:', err.message || err);
-      }
-    }, CONFIG.PRESENCE_INTERVAL);
-
-    // on any incoming event we can mark ping responded
-    sock.ev.on('chats.set', () => {
-      watchdogPingPending = false;
-    });
-    sock.ev.on('contacts.set', () => {
-      watchdogPingPending = false;
-    });
-    sock.ev.on('messages.upsert', () => {
-      watchdogPingPending = false;
-    });
-
     // GLOBAL ERROR HANDLERS
     if (!global.unhandledRejectionHandler) {
       global.unhandledRejectionHandler = (reason) => {
@@ -605,81 +582,24 @@ _Desenvolvido para UTE Pecém_`;
 }
 
 // -----------------------------
-// WATCHDOG IMPROVED
+// SIMPLE CONNECTION HEALTH CHECK
 // -----------------------------
-function startWatchdog() {
-  // Clear existing watchdog
-  if (watchdogTimer) {
-    clearInterval(watchdogTimer);
-    watchdogTimer = null;
-  }
-
-  watchdogTimer = setInterval(async () => {
+function startSimpleHealthCheck() {
+  setInterval(() => {
     try {
       if (!globalSock || !globalSock.user) {
-        logWarn('⚠️ Watchdog: Socket não está autenticado, ignorando...');
+        logWarn('⚠️ Health Check: Socket não está autenticado');
         return;
       }
-
-      // Check WebSocket state safely
-      let readyState = null;
-      try {
-        if (globalSock.ws) {
-          readyState = globalSock.ws.readyState;
-        }
-      } catch (e) {
-        logWarn('⚠️ Watchdog: Erro ao verificar readyState:', e.message);
-      }
-
-      // If readyState is not OPEN (1), trigger restart
-      if (readyState !== null && readyState !== 1) {
-        logWarn(`⚠️ Watchdog detectou WebSocket não aberto (readyState=${readyState}). Reiniciando...`);
-        await safeStopSock();
-        setTimeout(() => startBot(), 2000);
-        return;
-      }
-
-      // Send ping only if connected
-      if (readyState === 1) {
-        watchdogPingPending = true;
-        watchdogLastPing = Date.now();
-        try {
-          await globalSock.sendPresenceUpdate('available');
-        } catch (e) {
-          logWarn('⚠️ Watchdog ping falhou:', e.message || e);
-        }
-
-        // Check response timeout
-        setTimeout(async () => {
-          if (watchdogPingPending && (Date.now() - watchdogLastPing) > CONFIG.WATCHDOG_RESPONSE_TIMEOUT_MS) {
-            logWarn('⚠️ Watchdog: ping sem resposta em', CONFIG.WATCHDOG_RESPONSE_TIMEOUT_MS, 'ms. Reiniciando...');
-            await safeStopSock();
-            setTimeout(() => startBot(), 2000);
-          }
-        }, CONFIG.WATCHDOG_RESPONSE_TIMEOUT_MS + 100);
+      
+      // Verificação simples - se o socket tem user, considera-se saudável
+      if (globalSock.user) {
+        logInfo('💚 Health Check: Conexão saudável');
       }
     } catch (e) {
-      logWarn('⚠️ Watchdog erro:', e.message || e);
+      logWarn('⚠️ Health Check erro:', e.message || e);
     }
-  }, CONFIG.WATCHDOG_INTERVAL_MS);
-}
-
-// -----------------------------
-// DAILY RESTART AT 03:00
-// -----------------------------
-function scheduleDailyRestart() {
-  const now = new Date();
-  const next = new Date(now);
-  next.setHours(CONFIG.RESTART_HOUR, 0, 0, 0);
-  if (next <= now) next.setDate(next.getDate() + 1);
-  const delay = next.getTime() - now.getTime();
-  logInfo('🔁 Próximo reinício programado em (ms):', delay);
-  setTimeout(() => {
-    logInfo('🔁 Reinício diário acionado. Encerrando processo para PM2 reiniciar.');
-    process.exit(0);
-  }, delay);
-  // schedule again in 24h after firing
-  setTimeout(scheduleDailyRestart, delay + 1000);
+  }, 5 * 60 * 1000); // A cada 5 minutos
 }
 
 // -----------------------------
@@ -690,8 +610,8 @@ function scheduleDailyRestart() {
     await loadPersistedCache();
     startCacheMaintenance();
     await startBot();
-    scheduleDailyRestart();
-    logInfo('✅ Bot iniciado com todas as melhorias.');
+    startSimpleHealthCheck();
+    logInfo('✅ Bot iniciado - SEM restart diário');
   } catch (err) {
     logError('❌ Erro na inicialização:', err.message || err);
     process.exit(1);
