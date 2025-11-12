@@ -682,12 +682,15 @@ Produtos: ${productCache.size} itens`;
       ]);
 
       const cacheIndicator = consulta.source === 'cache' ? ' (🔄 Cache)' : '';
+
+      const textoBreve    = (produto.texto_breve ?? '').toString().trim();
+      const textoCompleto = (produto.texto_completo ?? '').toString().trim();
       
       const resposta = `📦 *Produto Encontrado!*${cacheIndicator}
 
 📌 *Código:* ${produto.id}
 📃 *Texto breve:* ${produto.texto_breve}
-📃 *Texo completo:* ${produto.texto_completo}
+📃 *Texto completo:* ${textoCompleto || '—'}
 
 📍 *Estoque:*
 🏭 *PPTM:* ${estoques.PTPC > 0 ? `${estoques.PTPC} ${unidade}` : "❌"}
