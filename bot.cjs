@@ -646,60 +646,57 @@ Produtos: ${productCache.size} itens`;
       return;
     }
 
-    // CONSULTA DE PRODUTO: !12345678
-    const codigoProduto = userMessage.slice(1);
-    if (!/^\d{8}$/.test(codigoProduto)) {
-      await sock.sendMessage(remetente, { 
-        text: "⚠️ *FORMATO INVÁLIDO!*\n\nUse: !12345678 (8 dígitos)\nEx: !00012345" 
-      });
-      await registrarConsultaCSV(remetente, codigoProduto, 'INVALID_FORMAT');
-      return;
-    }
+  // CONSULTA DE PRODUTO: !12345678
+const codigoProduto = userMessage.slice(1);
+if (!/^\d{8}$/.test(codigoProduto)) {
+  await sock.sendMessage(remetente, { 
+    text: "⚠️ *FORMATO INVÁLIDO!*\n\nUse: !12345678 (8 dígitos)\nEx: !00012345" 
+  });
+  await registrarConsultaCSV(remetente, codigoProduto, 'INVALID_FORMAT');
+  return;
+}
 
-    // Consultar produto
-    const consulta = await consultarProdutoAPI(codigoProduto);
-    
-    if (!consulta.success) {
-      await sock.sendMessage(remetente, { text: `❌ *ERRO:* ${consulta.error}` });
-      await registrarConsultaCSV(remetente, codigoProduto, 'API_ERROR', consulta.source);
-      return;
-    }
+// Consultar produto
+const consulta = await consultarProdutoAPI(codigoProduto);
 
-    if (consulta.data.success && consulta.data.data) {
-      const produto = consulta.data.data;
-      const unidade = produto.unidade;
+if (!consulta.success) {
+  await sock.sendMessage(remetente, { text: `❌ *ERRO:* ${consulta.error}` });
+  await registrarConsultaCSV(remetente, codigoProduto, 'API_ERROR', consulta.source);
+  return;
+}
 
-// soma estoques com segurança
-    const estoques = { PTPC: 0, GTPC: 0 };
-      (produto.estoques || []).forEach(e => {
+if (consulta.data.success && consulta.data.data) {
+  const produto = consulta.data.data;
+  const unidade = produto.unidade;
+
+  // Soma estoques com segurança
+  const estoques = { PTPC: 0, GTPC: 0 };
+  (produto.estoques || []).forEach(e => {
     const qtd = parseFloat(e.qAtual) || 0;
     if (e.empresa === 'PTPC') estoques.PTPC += qtd;
     if (e.empresa === 'GTPC') estoques.GTPC += qtd;
-});
+  });
 
   const [estoqueSegPTPC, estoqueSegGTPC] = await Promise.all([
-  obterEstoqueSeguranca(produto.id, 'PTPC'),
-  obterEstoqueSeguranca(produto.id, 'GTPC')
-]);
+    obterEstoqueSeguranca(produto.id, 'PTPC'),
+    obterEstoqueSeguranca(produto.id, 'GTPC')
+  ]);
 
   const cacheIndicator = consulta.source === 'cache' ? ' (🔄 Cache)' : '';
 
-// ✅ SEMPRE usa o valor “limpo”
-  const textoBreve    = (produto.texto_breve ?? '').toString().trim();
+  // ✅ SEMPRE usa o valor "limpo"
+  const textoBreve = (produto.texto_breve ?? '').toString().trim();
   const textoCompleto = (produto.texto_completo ?? '').toString().trim();
 
-// debug rápido (pode remover depois)
-  logInfo('📝 texto_completo length:', textoCompleto.length);
-
-// função util para quebrar (coloque no topo se ainda não tem)
+  // Função para quebrar texto longo em partes
   function chunkString(str, size = 3000) {
-  const parts = [];
-  for (let i = 0; i < str.length; i += size) parts.push(str.slice(i, i + size));
-  return parts;
-}
+    const parts = [];
+    for (let i = 0; i < str.length; i += size) parts.push(str.slice(i, i + size));
+    return parts;
+  }
 
-// mensagem base (sem o texto completo ainda)
-const cabecalho = `📦 *Produto Encontrado!*${cacheIndicator}
+  // Mensagem principal com cabeçalho
+  const cabecalho = `📦 *Produto Encontrado!*${cacheIndicator}
 
 📌 *Código:* ${produto.id}
 📃 *Texto breve:* ${textoBreve || '—'}
@@ -712,32 +709,38 @@ const cabecalho = `📦 *Produto Encontrado!*${cacheIndicator}
 🏭 *PPTM:* ${estoqueSegPTPC > 0 ? `${estoqueSegPTPC} ${unidade || ''}`.trim() : "❌"}
 🏭 *EP:* ${estoqueSegGTPC > 0 ? `${estoqueSegGTPC} ${unidade || ''}`.trim() : "❌"}`;
 
-// envia o cabeçalho
-await sock.sendMessage(remetente, { text: cabecalho });
+  // Envia o cabeçalho primeiro
+  await sock.sendMessage(remetente, { text: cabecalho });
 
-// envia SEMPRE o texto completo (em partes se necessário)
-const tituloDetalhe = `\n\n📝 *Texto completo:*\n`;
-if (!textoCompleto) {
-  await sock.sendMessage(remetente, { text: tituloDetalhe + '—' });
-} else {
-  const partes = chunkString(textoCompleto, 3000);
-  // primeira parte com o título
-  await sock.sendMessage(remetente, { text: tituloDetalhe + partes[0] });
-  for (let i = 1; i < partes.length; i++) {
-    await sock.sendMessage(remetente, { text: partes[i] });
-  }
-}
-
-await registrarConsultaCSV(remetente, codigoProduto, 'SUCCESS', consulta.source);
-
-    } else {
-      const erroApi = consulta.data?.message || 'Produto não encontrado.';
-      await sock.sendMessage(remetente, { 
-        text: `❌ *NÃO ENCONTRADO*\n\nCódigo: ${codigoProduto}\nMotivo: ${erroApi}` 
-      });
-      await registrarConsultaCSV(remetente, codigoProduto, 'NOT_FOUND', consulta.source);
+  // Envia o texto completo (em partes se necessário)
+  if (textoCompleto) {
+    const tituloDetalhe = `📝 *Texto completo:*\n`;
+    const textoComTitulo = tituloDetalhe + textoCompleto;
+    
+    const partes = chunkString(textoComTitulo, 3000);
+    
+    // Envia cada parte
+    for (let i = 0; i < partes.length; i++) {
+      await sock.sendMessage(remetente, { text: partes[i] });
+      // Pequena pausa entre mensagens para evitar rate limiting
+      if (i < partes.length - 1) await new Promise(resolve => setTimeout(resolve, 500));
     }
+  } else {
+    // Se não houver texto completo
+    await sock.sendMessage(remetente, { 
+      text: `📝 *Texto completo:*\n—` 
+    });
+  }
 
+  await registrarConsultaCSV(remetente, codigoProduto, 'SUCCESS', consulta.source);
+
+} else {
+  const erroApi = consulta.data?.message || 'Produto não encontrado.';
+  await sock.sendMessage(remetente, { 
+    text: `❌ *NÃO ENCONTRADO*\n\nCódigo: ${codigoProduto}\nMotivo: ${erroApi}` 
+  });
+  await registrarConsultaCSV(remetente, codigoProduto, 'NOT_FOUND', consulta.source);
+  }
   } catch (err) {
     logError('❌ Erro no comando:', err.message);
     await sock.sendMessage(remetente, { text: "❌ Erro interno. Tente novamente." });
