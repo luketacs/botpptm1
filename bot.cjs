@@ -687,6 +687,7 @@ Produtos: ${productCache.size} itens`;
 
 📌 *Código:* ${produto.id}
 📃 *Texto breve:* ${produto.texto_breve}
+📃 *Texo completo:* ${produto.texto_completo}
 
 📍 *Estoque:*
 🏭 *PPTM:* ${estoques.PTPC > 0 ? `${estoques.PTPC} ${unidade}` : "❌"}
