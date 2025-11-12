@@ -700,6 +700,7 @@ if (consulta.data.success && consulta.data.data) {
 
 📌 *Código:* ${produto.id}
 📃 *Texto breve:* ${textoBreve || '—'}
+📝 *Texto completo:* ${textoCompleto || '-'}
 
 📍 *Estoque:*
 🏭 *PPTM:* ${estoques.PTPC > 0 ? `${estoques.PTPC} ${unidade || ''}`.trim() : "❌"}
@@ -711,26 +712,6 @@ if (consulta.data.success && consulta.data.data) {
 
   // Envia o cabeçalho primeiro
   await sock.sendMessage(remetente, { text: cabecalho });
-
-  // Envia o texto completo (em partes se necessário)
-  if (textoCompleto) {
-    const tituloDetalhe = `📝 *Texto completo:*\n`;
-    const textoComTitulo = tituloDetalhe + textoCompleto;
-    
-    const partes = chunkString(textoComTitulo, 3000);
-    
-    // Envia cada parte
-    for (let i = 0; i < partes.length; i++) {
-      await sock.sendMessage(remetente, { text: partes[i] });
-      // Pequena pausa entre mensagens para evitar rate limiting
-      if (i < partes.length - 1) await new Promise(resolve => setTimeout(resolve, 500));
-    }
-  } else {
-    // Se não houver texto completo
-    await sock.sendMessage(remetente, { 
-      text: `📝 *Texto completo:*\n—` 
-    });
-  }
 
   await registrarConsultaCSV(remetente, codigoProduto, 'SUCCESS', consulta.source);
 
