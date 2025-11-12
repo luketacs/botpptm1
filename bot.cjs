@@ -668,40 +668,68 @@ Produtos: ${productCache.size} itens`;
     if (consulta.data.success && consulta.data.data) {
       const produto = consulta.data.data;
       const unidade = produto.unidade;
-      
-      const estoques = { PTPC: 0, GTPC: 0 };
-      produto.estoques.forEach(e => {
-        const qtd = parseFloat(e.qAtual) || 0;
-        if (e.empresa === 'PTPC') estoques.PTPC += qtd;
-        if (e.empresa === 'GTPC') estoques.GTPC += qtd;
-      });
 
-      const [estoqueSegPTPC, estoqueSegGTPC] = await Promise.all([
-        obterEstoqueSeguranca(produto.id, 'PTPC'),
-        obterEstoqueSeguranca(produto.id, 'GTPC')
-      ]);
+// soma estoques com segurança
+    const estoques = { PTPC: 0, GTPC: 0 };
+      (produto.estoques || []).forEach(e => {
+    const qtd = parseFloat(e.qAtual) || 0;
+    if (e.empresa === 'PTPC') estoques.PTPC += qtd;
+    if (e.empresa === 'GTPC') estoques.GTPC += qtd;
+});
 
-      const cacheIndicator = consulta.source === 'cache' ? ' (🔄 Cache)' : '';
+  const [estoqueSegPTPC, estoqueSegGTPC] = await Promise.all([
+  obterEstoqueSeguranca(produto.id, 'PTPC'),
+  obterEstoqueSeguranca(produto.id, 'GTPC')
+]);
 
-      const textoBreve    = (produto.texto_breve ?? '').toString().trim();
-      const textoCompleto = (produto.texto_completo ?? '').toString().trim();
-      
-      const resposta = `📦 *Produto Encontrado!*${cacheIndicator}
+  const cacheIndicator = consulta.source === 'cache' ? ' (🔄 Cache)' : '';
+
+// ✅ SEMPRE usa o valor “limpo”
+  const textoBreve    = (produto.texto_breve ?? '').toString().trim();
+  const textoCompleto = (produto.texto_completo ?? '').toString().trim();
+
+// debug rápido (pode remover depois)
+  logInfo('📝 texto_completo length:', textoCompleto.length);
+
+// função util para quebrar (coloque no topo se ainda não tem)
+  function chunkString(str, size = 3000) {
+  const parts = [];
+  for (let i = 0; i < str.length; i += size) parts.push(str.slice(i, i + size));
+  return parts;
+}
+
+// mensagem base (sem o texto completo ainda)
+const cabecalho = `📦 *Produto Encontrado!*${cacheIndicator}
 
 📌 *Código:* ${produto.id}
-📃 *Texto breve:* ${produto.texto_breve}
-📃 *Texto completo:* ${produto.texto_completo}
+📃 *Texto breve:* ${textoBreve || '—'}
 
 📍 *Estoque:*
-🏭 *PPTM:* ${estoques.PTPC > 0 ? `${estoques.PTPC} ${unidade}` : "❌"}
-🏭 *EP:* ${estoques.GTPC > 0 ? `${estoques.GTPC} ${unidade}` : "❌"}
+🏭 *PPTM:* ${estoques.PTPC > 0 ? `${estoques.PTPC} ${unidade || ''}`.trim() : "❌"}
+🏭 *EP:* ${estoques.GTPC > 0 ? `${estoques.GTPC} ${unidade || ''}`.trim() : "❌"}
 
 ⚠️ *Estoque Segurança:*
-🏭 *PPTM:* ${estoqueSegPTPC > 0 ? `${estoqueSegPTPC} ${unidade}` : "❌"}
-🏭 *EP:* ${estoqueSegGTPC > 0 ? `${estoqueSegGTPC} ${unidade}` : "❌"}`;
+🏭 *PPTM:* ${estoqueSegPTPC > 0 ? `${estoqueSegPTPC} ${unidade || ''}`.trim() : "❌"}
+🏭 *EP:* ${estoqueSegGTPC > 0 ? `${estoqueSegGTPC} ${unidade || ''}`.trim() : "❌"}`;
 
-      await sock.sendMessage(remetente, { text: resposta });
-      await registrarConsultaCSV(remetente, codigoProduto, 'SUCCESS', consulta.source);
+// envia o cabeçalho
+await sock.sendMessage(remetente, { text: cabecalho });
+
+// envia SEMPRE o texto completo (em partes se necessário)
+const tituloDetalhe = `\n\n📝 *Texto completo:*\n`;
+if (!textoCompleto) {
+  await sock.sendMessage(remetente, { text: tituloDetalhe + '—' });
+} else {
+  const partes = chunkString(textoCompleto, 3000);
+  // primeira parte com o título
+  await sock.sendMessage(remetente, { text: tituloDetalhe + partes[0] });
+  for (let i = 1; i < partes.length; i++) {
+    await sock.sendMessage(remetente, { text: partes[i] });
+  }
+}
+
+await registrarConsultaCSV(remetente, codigoProduto, 'SUCCESS', consulta.source);
+
     } else {
       const erroApi = consulta.data?.message || 'Produto não encontrado.';
       await sock.sendMessage(remetente, { 
